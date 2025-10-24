@@ -52,9 +52,6 @@ kubectl apply -f https://github.com/aws-containers/retail-store-sample-app/relea
 
 **Live Application**: http://k8s-default-ui-8c6cd7bbdd-f08607c24d54e805.elb.eu-north-1.amazonaws.com
 
-## 👥 Developer Access
-
-Read-only IAM user credentials and kubectl configuration instructions are provided in the [Deployment Guide](DEPLOYMENT_GUIDE.md).
 
 ## 🔄 CI/CD Pipeline
 
@@ -62,44 +59,3 @@ Read-only IAM user credentials and kubectl configuration instructions are provid
 - **Main Branch**: Trigger `terraform apply`
 - **Cleanup**: Enhanced destroy workflow with dependency handling
 - **Security**: AWS credentials managed via GitHub secrets
-
-## 📊 Monitoring
-
-Check application status:
-```bash
-kubectl get pods --all-namespaces
-kubectl get services
-kubectl logs -f deployment/ui
-```
-
-## 🧹 Cleanup
-
-**Automated (Recommended):**
-- Use GitHub Actions: `Terraform Destroy Enhanced` workflow
-- Handles dependencies and prevents deletion errors
-
-**Manual:**
-```bash
-kubectl delete -f https://github.com/aws-containers/retail-store-sample-app/releases/latest/download/kubernetes.yaml
-terraform destroy
-```
-
-## 📋 Assessment Completion
-
-### ✅ Core Requirements Completed
-- [x] Infrastructure as Code (Terraform)
-- [x] EKS Cluster with VPC and IAM roles
-- [x] Application deployment with in-cluster dependencies
-- [x] Read-only developer IAM user
-- [x] CI/CD pipeline with GitHub Actions
-
-### 🎯 Bonus Objectives Available
-- [ ] Managed AWS services (RDS, DynamoDB)
-- [ ] Advanced networking with ALB Ingress
-- [ ] Custom domain with SSL/TLS
-
----
-
-**Project**: InnovateMart EKS Deployment  
-**Status**: ✅ Production Ready  
-**Team**: Cloud DevOps Engineering
