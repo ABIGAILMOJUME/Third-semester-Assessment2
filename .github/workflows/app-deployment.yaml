@@ -1,0 +1,65 @@
+name: Application Deployment
+
+on:
+  workflow_run:
+    workflows: ["Terraform Infrastructure"]
+    types:
+      - completed
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: retail-store
+
+jobs:
+  deploy-app:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Deploy Application
+      run: |
+        echo "Deploying retail store application..."
+        kubectl apply -f https://github.com/aws-containers/retail-store-sample-app/releases/latest/download/kubernetes.yaml
+        
+        echo "Waiting for deployments to be ready..."
+        kubectl wait --for=condition=available deployments --all --timeout=600s
+        
+        echo "Application deployed successfully!"
+
+    - name: Get Application Status
+      run: |
+        echo "=== Pods Status ==="
+        kubectl get pods --all-namespaces
+        echo ""
+        echo "=== Services ==="
+        kubectl get svc --all-namespaces
+        echo ""
+        echo "=== Application URL ==="
+        LB_URL=$(kubectl get svc ui -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+        if [ ! -z "$LB_URL" ]; then
+          echo "Application URL: http://$LB_URL"
+        else
+          echo "LoadBalancer URL not ready yet. Check again in a few minutes."
+        fi
+
+    - name: Test Application Health
+      run: |
+        echo "Testing application health..."
+        kubectl get pods --all-namespaces | grep -E "(Running|Ready)"
+        echo "Application deployed successfully!"

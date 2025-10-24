@@ -1,0 +1,122 @@
+
+name: Terraform Destroy Enhanced
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm'
+        required: true
+        default: ''
+      target:
+        description: 'Destroy target'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - app-only
+        - infrastructure-only
+
+env:
+  TF_VERSION: '1.5.0'
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: retail-store
+
+jobs:
+  destroy-application:
+    name: Destroy Application
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'destroy' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'app-only')
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Delete Application and Dependencies
+      run: |
+        # Delete application resources
+        kubectl delete -f https://github.com/aws-containers/retail-store-sample-app/releases/latest/download/kubernetes.yaml --ignore-not-found=true
+        
+        # Clean up LoadBalancers
+        kubectl get svc --all-namespaces -o json | jq -r '.items[] | select(.spec.type=="LoadBalancer") | .metadata.name' | while read svc; do
+          kubectl delete svc $svc --ignore-not-found=true
+        done
+        
+        # Clean up AWS LoadBalancers
+        aws elbv2 describe-load-balancers --region ${{ env.AWS_REGION }} --query 'LoadBalancers[?contains(LoadBalancerName, `k8s-`)].LoadBalancerArn' --output text | while read lb_arn; do
+          if [ ! -z "$lb_arn" ]; then
+            aws elbv2 delete-load-balancer --load-balancer-arn $lb_arn --region ${{ env.AWS_REGION }} || true
+          fi
+        done
+        
+        sleep 60
+
+  terraform-destroy:
+    name: Terraform Destroy Infrastructure
+    runs-on: ubuntu-latest
+    needs: destroy-application
+    if: always() && github.event.inputs.confirm == 'destroy' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'infrastructure-only')
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Terraform Init
+      working-directory: terraform/eks/minimal
+      run: |
+        terraform init -backend-config="bucket=my-terraform-state-bucket-abigail-eks" \
+                        -backend-config="key=terraform.tfstate" \
+                        -backend-config="region=${{ env.AWS_REGION }}" \
+                        -backend-config="dynamodb_table=terraform-lock-table" \
+                        -backend-config="encrypt=true"
+
+    - name: Clean up IAM User Dependencies
+      working-directory: terraform/eks/minimal
+      run: |
+        echo "Cleaning up IAM user dependencies..."
+        # Delete login profile if it exists
+        aws iam delete-login-profile --user-name retail-store-eks-readonly-dev 2>/dev/null || echo "No login profile found"
+        # Delete access keys
+        aws iam list-access-keys --user-name retail-store-eks-readonly-dev --query 'AccessKeyMetadata[].AccessKeyId' --output text | while read key_id; do
+          if [ ! -z "$key_id" ]; then
+            aws iam delete-access-key --user-name retail-store-eks-readonly-dev --access-key-id $key_id || true
+          fi
+        done
+        echo "IAM user cleanup completed"
+
+    - name: Terraform Destroy
+      working-directory: terraform/eks/minimal
+      run: terraform destroy -auto-approve
+
+    - name: Cleanup Backend Resources
+      if: github.event.inputs.target == 'all'
+      run: |
+        echo "Cleaning up backend resources..."
+        aws s3 rm s3://my-terraform-state-bucket-abigail-eks --recursive || true
+        aws s3 rb s3://my-terraform-state-bucket-abigail-eks || true
+        aws dynamodb delete-table --table-name terraform-lock-tables --region ${{ env.AWS_REGION }} || true
+        echo "Backend cleanup completed"

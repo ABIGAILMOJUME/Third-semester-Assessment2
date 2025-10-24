@@ -1,0 +1,122 @@
+
+
+# name: Terraform CI/CD
+
+# on:
+#   push:
+#     branches:
+#       - main
+#       - 'feature/*'
+#   pull_request:
+
+# jobs:
+#   terraform:
+#     name: Terraform
+#     runs-on: ubuntu-latest
+
+#     permissions:
+#       id-token: write   # required for OIDC
+#       contents: read
+
+#     env:
+#     #   TF_WORKING_DIR: ./eks-project   # adjust if your TF code lives in subfolder
+#       TF_WORKING_DIR: ../../default
+
+#     steps:
+#       # Checkout repo
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       # Configure AWS credentials (OIDC best practice)
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/github-actions-terraform
+#           aws-region: us-east-1
+
+#       # Setup Terraform
+#       - name: Setup Terraform
+#         uses: hashicorp/setup-terraform@v3
+
+#       # Initialize Terraform
+#       - name: Terraform Init
+#         working-directory: ${{ env.TF_WORKING_DIR }}
+#         run: terraform init
+
+#       # Validate syntax
+#       - name: Terraform Validate
+#         working-directory: ${{ env.TF_WORKING_DIR }}
+#         run: terraform validate
+
+#       # Plan on feature branches & PRs
+#       - name: Terraform Plan
+#         if: github.ref != 'refs/heads/main'
+#         working-directory: ${{ env.TF_WORKING_DIR }}
+#         run: terraform plan -out=tfplan
+
+#       # Apply only on main branch
+#       - name: Terraform Apply
+#         if: github.ref == 'refs/heads/main'
+#         working-directory: ${{ env.TF_WORKING_DIR }}
+#         run: terraform apply -auto-approve
+
+
+
+
+
+name: Terraform CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/*'
+  pull_request:
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+
+    env:
+      TF_WORKING_DIR: ../../default   # adjust if TF code lives in subfolder
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+    steps:
+      # Checkout repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure AWS credentials (from GitHub Secrets)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Initialize Terraform
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      # Validate syntax
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      # Plan on feature branches & PRs
+      - name: Terraform Plan
+        if: github.ref != 'refs/heads/main'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -out=tfplan
+
+      # Apply only on main branch
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve

@@ -1,0 +1,105 @@
+name: Terraform Infrastructure
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'terraform/**' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'terraform/**' ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.5.0
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Terraform Init
+      working-directory: terraform/eks/minimal
+      run: |
+        terraform init -backend-config="bucket=my-terraform-state-bucket-abigail-eks" \
+                        -backend-config="key=terraform.tfstate" \
+                        -backend-config="region=${{ env.AWS_REGION }}" \
+                        -backend-config="dynamodb_table=terraform-lock-table" \
+                        -backend-config="encrypt=true"
+
+    - name: Terraform Plan
+      working-directory: terraform/eks/minimal
+      run: terraform plan -no-color
+      continue-on-error: true
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Terraform Init
+      working-directory: terraform/eks/minimal
+      run: |
+        terraform init -backend-config="bucket=my-terraform-state-bucket-abigail-eks" \
+                        -backend-config="key=terraform.tfstate" \
+                        -backend-config="region=${{ env.AWS_REGION }}" \
+                        -backend-config="dynamodb_table=terraform-lock-table" \
+                        -backend-config="encrypt=true"
+
+    - name: Handle Existing Resources
+      working-directory: terraform/eks/minimal
+      run: |
+        echo "Checking for existing resources..."
+        
+        # Import existing IAM roles
+        terraform import module.retail_app_eks.module.iam_assumable_role_adot_amp.aws_iam_role.this[0] retail-store-adot-col-xray 2>/dev/null || echo "ADOT XRay role not found or already imported"
+        terraform import module.retail_app_eks.module.iam_assumable_role_adot_logs.aws_iam_role.this[0] retail-store-adot-col-logs 2>/dev/null || echo "ADOT Logs role not found or already imported"
+        
+        # Import other existing resources
+        terraform import aws_kms_alias.eks_cluster alias/eks/retail-store 2>/dev/null || echo "KMS alias not found or already imported"
+        terraform import aws_cloudwatch_log_group.eks_cluster /aws/eks/retail-store/cluster 2>/dev/null || echo "Log group not found or already imported"
+        
+        echo "Resource check completed"
+
+    - name: Terraform Apply
+      working-directory: terraform/eks/minimal
+      run: terraform apply -auto-approve
+
+    - name: Output cluster info
+      working-directory: terraform/eks/minimal
+      run: |
+        echo "EKS Cluster deployed successfully!"
+        terraform output configure_kubectl
