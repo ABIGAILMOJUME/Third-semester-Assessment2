@@ -13,3 +13,10 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+# Terraform files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform.lock.hcl
+**/.terraform/*
